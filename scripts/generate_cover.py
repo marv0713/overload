@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+import argparse
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+
+
+def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    candidates = [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+    ]
+    for path in candidates:
+        if Path(path).exists():
+            return ImageFont.truetype(path, size=size)
+    return ImageFont.load_default()
+
+
+def generate_cover(
+    output: Path,
+    column: str,
+    ticker: str,
+    subtitle: str = "",
+    issue: str = "",
+    hook: str = "",
+) -> None:
+    width, height = 900, 500
+    image = Image.new("RGB", (width, height), "#101113")
+    draw = ImageDraw.Draw(image)
+
+    for y in range(height):
+        shade = int(16 + y / height * 16)
+        draw.line([(0, y), (width, y)], fill=(shade, shade, shade + 2))
+
+    gold = "#d4af37"
+    muted_gold = "#7b6425"
+    for x in range(80, width, 140):
+        draw.line([(x, 80), (x + 90, 420)], fill=muted_gold, width=1)
+    for y in [120, 250, 380]:
+        draw.line([(90, y), (810, y - 20)], fill="#242424", width=2)
+
+    draw.rectangle((52, 52, width - 52, height - 52), outline=gold, width=3)
+    draw.rectangle((68, 68, width - 68, height - 68), outline="#4b3d19", width=1)
+
+    headline_font = _font(64)
+    issue_font = _font(28)
+    hook_font = _font(42)
+    subtitle_font = _font(30)
+    if issue:
+        draw.text((92, 82), issue, font=issue_font, fill="#9c8a52")
+    _center_text(draw, (0, 152, width, 232), f"{column}：{ticker}", headline_font, gold)
+    if hook:
+        _center_text(draw, (80, 250, width - 80, 322), hook, hook_font, "#f2f0e8")
+    if subtitle:
+        _center_text(draw, (0, 350, width, 390), subtitle, subtitle_font, "#c8b46b")
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    image.save(output)
+
+
+def _center_text(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font, fill: str) -> None:
+    left, top, right, bottom = box
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    x = left + (right - left - text_width) / 2
+    y = top + (bottom - top - text_height) / 2
+    draw.text((x, y), text, font=font, fill=fill)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate a recurring WeChat cover image.")
+    parser.add_argument("--ticker", required=True, help="Ticker or topic shown as the main text")
+    parser.add_argument("--subtitle", default="", help="Small subtitle shown below the ticker")
+    parser.add_argument("--issue", default="", help="Series issue label, e.g. No.001")
+    parser.add_argument("--hook", default="", help="Short hook line based on article content")
+    parser.add_argument("--column", default="炼金投研", help="Column label")
+    parser.add_argument("--output", required=True, help="Output PNG path")
+    args = parser.parse_args()
+
+    generate_cover(
+        Path(args.output),
+        column=args.column,
+        ticker=args.ticker,
+        subtitle=args.subtitle,
+        issue=args.issue,
+        hook=args.hook,
+    )
+    print(f"Wrote cover to {args.output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

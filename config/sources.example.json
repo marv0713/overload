@@ -1,0 +1,26 @@
+{
+  "sources": [
+    {
+      "type": "youtube_channel",
+      "name": "Example Investing Channel",
+      "url": "https://www.youtube.com/@example/videos",
+      "enabled": true,
+      "series": "炼金投研",
+      "priority": 10,
+      "min_duration_seconds": 600,
+      "writer_profile": "deep-stock-analysis",
+      "compare_evaluation": "none"
+    },
+    {
+      "type": "youtube_channel",
+      "name": "Example Market Commentary",
+      "url": "https://www.youtube.com/@example-market/videos",
+      "enabled": false,
+      "series": "炼金投研",
+      "priority": 20,
+      "min_duration_seconds": 600,
+      "writer_profile": "market-commentary",
+      "compare_evaluation": "none"
+    }
+  ]
+}
