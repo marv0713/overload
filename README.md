@@ -1,13 +1,13 @@
 # overlord
 
-`overlord` 是一个本地优先的内容处理 MVP：从公开内容源抓取素材，转成适合微信公众号草稿箱的文章。当前第一条路径是 YouTube 投研频道到「炼金投研」系列草稿。
+`overlord` 是一个本地优先的内容处理 MVP：从公开内容源抓取素材，转成适合微信公众号草稿箱的文章。当前第一条路径是 YouTube 频道到公众号草稿。
 
 ## 能做什么
 
 - 从单个 YouTube 视频 URL 获取元数据和字幕。
 - 从配置的 YouTube 频道里扫描候选视频。
 - 记录每个频道的处理进度，避免重复处理。
-- 按全局系列编号生成「炼金投研 No.xxx」。
+- 按全局系列编号生成公众号文章。
 - 按不同博主/视频类型选择不同 writer profile。
 - 生成本地 `article.md`、`article.html`、`transcript.txt`、`meta.json` 和 `run.json`。
 - 可选推送到微信公众号草稿箱，不自动发布。
@@ -83,7 +83,7 @@ cp config/sources.example.json config/sources.json
 - `type`：当前支持 `youtube_channel`。
 - `name`：来源名称。
 - `url`：YouTube 频道地址。
-- `series`：系列名，当前默认 `炼金投研`。
+- `series`：公众号系列名。
 - `priority`：全局队列优先级，数字越小越先处理。
 - `min_duration_seconds`：过滤短视频。
 - `writer_profile`：使用 `config/writer_profiles/<name>.md`。
@@ -138,7 +138,7 @@ PYTHONPATH=src .venv/bin/python scripts/generate_cover.py \
 
 `process_sources.py` 会构建一个全局候选队列：
 
-- 所有来源共享同一个 `series` 编号，例如 `炼金投研 No.001`、`No.002`。
+- 所有来源共享同一个 `series` 编号，例如 `No.001`、`No.002`。
 - 先按 `priority` 排序。
 - 对已有处理记录的来源，只处理该来源最新已处理视频之后发布的新视频。
 - 对新加入、没有历史记录的来源，只选最新一条符合时长要求的视频，避免一次性回填旧内容。
