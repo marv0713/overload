@@ -38,11 +38,13 @@ def select_eligible_videos_for_source(
 ) -> list[ChannelVideo]:
     source_videos = list(videos)
     if source_seen_before and stop_at_video_ids:
-        source_videos = []
-        for video in videos:
-            if video.video_id in stop_at_video_ids:
-                break
-            source_videos.append(video)
+        processed_indices = [
+            index
+            for index, video in enumerate(source_videos)
+            if video.video_id in stop_at_video_ids
+        ]
+        if processed_indices:
+            source_videos = source_videos[: max(processed_indices)]
 
     eligible = [
         video
@@ -52,7 +54,13 @@ def select_eligible_videos_for_source(
     ]
     if not source_seen_before:
         return eligible[:1]
-    return sorted(eligible, key=lambda video: video.published_at or "9999-12-31")
+    return [
+        video
+        for _, video in sorted(
+            enumerate(eligible),
+            key=lambda item: (item[1].published_at or "9999-12-31", -item[0]),
+        )
+    ]
 
 
 def fetch_channel_videos(

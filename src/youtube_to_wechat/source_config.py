@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
-SourceConfigType = Literal["youtube_channel"]
+SourceConfigType = Literal["youtube_channel", "podcast_rss"]
 
 
 @dataclass
@@ -18,6 +18,7 @@ class SourceConfig:
     min_duration_seconds: int = 600
     writer_profile: str = "alchemy-research"
     compare_evaluation: str = "none"
+    rss_url: str = ""  # Required for podcast_rss sources
 
 
 @dataclass
@@ -42,4 +43,5 @@ def _source_from_dict(data: dict[str, Any]) -> SourceConfig:
         min_duration_seconds=int(data.get("min_duration_seconds", 600)),
         writer_profile=data.get("writer_profile", "alchemy-research"),
         compare_evaluation=data.get("compare_evaluation", "none"),
+        rss_url=data.get("rss_url", ""),
     )

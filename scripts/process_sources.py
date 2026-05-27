@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Process latest eligible videos from configured YouTube channel sources."""
+"""Process latest eligible items from configured sources (YouTube channels and Xiaoyuzhou podcasts)."""
 import argparse
 import json
 import sys
@@ -11,6 +11,13 @@ from youtube_to_wechat.processed_store import ProcessedStore, slugify_source_nam
 from youtube_to_wechat.source_config import SourceConfig, load_source_config
 from youtube_to_wechat.writer import GeminiWriter, WriterError
 from youtube_to_wechat.writer_profiles import load_writer_profile
+from youtube_to_wechat.xiaoyuzhou import (
+    PodcastEpisode,
+    XiaoyuzhouError,
+    download_episode_audio,
+    fetch_podcast_episodes,
+    select_eligible_episodes,
+)
 from youtube_to_wechat.youtube_channel import (
     ChannelVideo,
     fetch_channel_videos,
@@ -24,7 +31,21 @@ from youtube_to_wechat.ytdlp import YtDlpError, download_audio, fetch_info, fetc
 class SourceCandidate:
     source: SourceConfig
     source_slug: str
-    video: ChannelVideo
+    # One of the two will be set depending on source type
+    video: ChannelVideo | None = None
+    episode: PodcastEpisode | None = None
+
+    @property
+    def item_id(self) -> str:
+        return self.video.video_id if self.video else (self.episode.episode_id if self.episode else "")
+
+    @property
+    def item_title(self) -> str:
+        return self.video.title if self.video else (self.episode.title if self.episode else "")
+
+    @property
+    def item_published_at(self) -> str:
+        return self.video.published_at if self.video else (self.episode.published_at if self.episode else "")
 
 
 def process_video_url(
@@ -115,37 +136,63 @@ def collect_source_candidates(
         if not source.enabled:
             print(f"[skip] {source.name}: disabled")
             continue
-        if source.type != "youtube_channel":
-            print(f"[skip] {source.name}: unsupported source type {source.type}")
-            continue
 
         source_slug = slugify_source_name(source.name)
         source_seen_before = store.has_source(source_slug)
-        videos = fetch_channel_videos(
-            source.url,
-            limit=channel_limit,
-            no_check_certificates=no_check_certificates,
-        )
-        store.record_source_scan(source_name=source.name, source_slug=source_slug, videos=videos)
-        selected_videos = select_eligible_videos_for_source(
-            videos,
-            min_duration_seconds=source.min_duration_seconds,
-            processed_video_ids=store.processed_video_ids(),
-            source_seen_before=source_seen_before,
-            stop_at_video_ids=store.processed_video_ids_for_source(source_slug),
-        )
-        if not selected_videos:
-            print(f"[skip] {source.name}: no new long video found")
+
+        if source.type == "youtube_channel":
+            videos = fetch_channel_videos(
+                source.url,
+                limit=channel_limit,
+                no_check_certificates=no_check_certificates,
+            )
+            store.record_source_scan(source_name=source.name, source_slug=source_slug, videos=videos)
+            selected_videos = select_eligible_videos_for_source(
+                videos,
+                min_duration_seconds=source.min_duration_seconds,
+                processed_video_ids=store.processed_video_ids(),
+                source_seen_before=source_seen_before,
+                stop_at_video_ids=store.processed_video_ids_for_source(source_slug),
+            )
+            if not selected_videos:
+                print(f"[skip] {source.name}: no new long video found")
+                continue
+            for video in selected_videos:
+                candidates.append(SourceCandidate(source=source, source_slug=source_slug, video=video))
+
+        elif source.type == "podcast_rss":
+            rss_url = source.rss_url or source.url
+            if not rss_url:
+                print(f"[skip] {source.name}: no rss_url configured")
+                continue
+            try:
+                episodes = fetch_podcast_episodes(
+                    rss_url,
+                    limit=channel_limit,
+                    no_check_certificates=no_check_certificates,
+                )
+            except XiaoyuzhouError as exc:
+                print(f"[skip] {source.name}: RSS fetch failed: {exc}")
+                continue
+            selected_episodes = select_eligible_episodes(
+                episodes,
+                min_duration_seconds=source.min_duration_seconds,
+                processed_episode_ids=store.processed_video_ids(),
+                source_seen_before=source_seen_before,
+            )
+            if not selected_episodes:
+                print(f"[skip] {source.name}: no new long episode found")
+                continue
+            for ep in selected_episodes:
+                candidates.append(SourceCandidate(source=source, source_slug=source_slug, episode=ep))
+
+        else:
+            print(f"[skip] {source.name}: unsupported source type {source.type}")
             continue
-        for video in selected_videos:
-            candidates.append(SourceCandidate(source=source, source_slug=source_slug, video=video))
 
     return sorted(
         candidates,
-        key=lambda candidate: (
-            candidate.source.priority,
-            candidate.video.published_at or "9999-12-31",
-        ),
+        key=lambda c: (c.source.priority, c.item_published_at or "9999-12-31"),
     )
 
 
@@ -158,32 +205,54 @@ def process_candidate(
     generate_article: bool = False,
     writer_profile_dir: Path = Path("config/writer_profiles"),
     gemini_model: str = "gemini-2.5-flash",
+    model_size: str = "base",
+    language: str = "zh",
 ) -> int:
     source = candidate.source
-    selected = candidate.video
-    print(f"[pick] {source.name}: {selected.title} ({selected.duration_seconds}s)")
-    print(f"       {selected.url}")
+    print(f"[pick] {source.name}: {candidate.item_title}")
     if dry_run:
         return 0
 
-    output_dir, run = process_video_url(
-        selected.url,
-        output_base=output_base / candidate.source_slug,
-        no_check_certificates=no_check_certificates,
-        skip_audio=source.compare_evaluation == "none",
-        generate_article=generate_article,
-        writer_profile=source.writer_profile,
-        writer_profile_dir=writer_profile_dir,
-        gemini_model=gemini_model,
-    )
+    if candidate.video is not None:
+        output_dir, run = process_video_url(
+            candidate.video.url,
+            output_base=output_base / candidate.source_slug,
+            no_check_certificates=no_check_certificates,
+            skip_audio=source.compare_evaluation == "none",
+            generate_article=generate_article,
+            writer_profile=source.writer_profile,
+            writer_profile_dir=writer_profile_dir,
+            gemini_model=gemini_model,
+        )
+        item_id = candidate.video.video_id
+        item_url = candidate.video.url
+        item_title = candidate.video.title
+    else:
+        ep = candidate.episode
+        output_dir, run = process_episode(
+            ep,
+            source_slug=candidate.source_slug,
+            output_base=output_base / candidate.source_slug,
+            no_check_certificates=no_check_certificates,
+            generate_article=generate_article,
+            writer_profile=source.writer_profile,
+            writer_profile_dir=writer_profile_dir,
+            gemini_model=gemini_model,
+            model_size=model_size,
+            language=language,
+        )
+        item_id = ep.episode_id
+        item_url = ep.episode_url
+        item_title = ep.title
+
     if run["status"] != "error":
         issue = store.allocate_issue(source.series)
         store.mark_processed(
-            selected.video_id,
+            item_id,
             source_name=source.name,
             source_slug=candidate.source_slug,
-            title=selected.title,
-            url=selected.url,
+            title=item_title,
+            url=item_url,
             output_dir=str(output_dir),
             status=run["status"],
             series=source.series,
@@ -193,6 +262,109 @@ def process_candidate(
         print(f"[issue] {source.series}: {issue}")
     print(f"[done] {source.name}: {run['status']} -> {output_dir}")
     return 1
+
+
+def process_episode(
+    ep: PodcastEpisode,
+    source_slug: str,
+    output_base: Path,
+    no_check_certificates: bool = False,
+    generate_article: bool = False,
+    writer_profile: str = "alchemy-research",
+    writer_profile_dir: Path = Path("config/writer_profiles"),
+    gemini_model: str = "gemini-2.5-flash",
+    model_size: str = "base",
+    language: str = "zh",
+) -> tuple[Path, dict]:
+    """Download, transcribe, and optionally write an article for one podcast episode."""
+    output_dir = output_base / ep.episode_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    meta = {
+        "episode_id": ep.episode_id,
+        "title": ep.title,
+        "podcast_name": ep.podcast_name,
+        "episode_url": ep.episode_url,
+        "audio_url": ep.audio_url,
+        "duration_seconds": ep.duration_seconds,
+        "published_at": ep.published_at,
+        "description": ep.description,
+        "source": "podcast_rss",
+    }
+    (output_dir / "meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    run: dict = {
+        "status": "ok",
+        "transcript_status": "pending",
+        "article_status": "skipped",
+        "writer_profile": writer_profile,
+    }
+
+    # Download audio
+    try:
+        audio_path = download_episode_audio(
+            ep.audio_url,
+            output_dir / "audio",
+            no_check_certificates=no_check_certificates,
+        )
+        audio_size = audio_path.stat().st_size
+        run["audio_status"] = "ok"
+        run["audio_path"] = str(audio_path)
+        run["audio_size_bytes"] = audio_size
+        run["audio_size_mb"] = round(audio_size / 1024 / 1024, 1)
+    except XiaoyuzhouError as exc:
+        run["transcript_status"] = "error"
+        run["transcript_error"] = str(exc)
+        run["status"] = "error"
+        (output_dir / "run.json").write_text(
+            json.dumps(run, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        return output_dir, run
+
+    # Transcribe
+    from youtube_to_wechat.transcriber import FasterWhisperTranscriber, TranscriberError  # noqa: PLC0415
+    transcriber = FasterWhisperTranscriber(model_size=model_size, language=language or None)
+    try:
+        transcript = transcriber.transcribe(audio_path)
+        run["transcript_status"] = "ok"
+    except TranscriberError as exc:
+        run["transcript_status"] = "error"
+        run["transcript_error"] = str(exc)
+        run["status"] = "partial"
+        transcript = ep.description  # fall back to RSS description
+
+    (output_dir / "transcript.txt").write_text(
+        f"【节目简介】\n{ep.description}\n\n【音频转写】\n{transcript}\n",
+        encoding="utf-8",
+    )
+    # Full transcript for Gemini = show notes + audio transcription
+    full_transcript = f"节目简介：\n{ep.description}\n\n音频内容转写：\n{transcript}"
+
+    # Generate article
+    if generate_article and transcript:
+        try:
+            profile = load_writer_profile(writer_profile, writer_profile_dir)
+            writer = GeminiWriter(
+                model=gemini_model,
+                profile_name=profile.name,
+                profile_prompt=profile.prompt,
+            )
+            article = writer.write(full_transcript, meta)
+            write_article(output_base / ep.episode_id, ep.episode_id, article.markdown)
+            run["article_status"] = "ok"
+            run["article_title"] = article.title
+        except (OSError, WriterError) as exc:
+            run["article_status"] = "error"
+            run["article_error"] = str(exc)
+            if run["status"] == "ok":
+                run["status"] = "partial"
+
+    (output_dir / "run.json").write_text(
+        json.dumps(run, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return output_dir, run
 
 
 def process_source(

@@ -158,8 +158,40 @@ class YoutubeChannelSelectionTests(unittest.TestCase):
 
         self.assertEqual(
             [video.video_id for video in selected],
-            ["newest-after-last-processed", "middle-after-last-processed"],
+            ["middle-after-last-processed", "newest-after-last-processed"],
         )
+
+    def test_existing_source_backfills_unprocessed_video_between_processed_videos(self):
+        videos = [
+            ChannelVideo(
+                video_id="newest-processed",
+                title="Newest processed",
+                url="https://www.youtube.com/watch?v=newest-processed",
+                duration_seconds=900,
+            ),
+            ChannelVideo(
+                video_id="middle-unprocessed",
+                title="Middle unprocessed",
+                url="https://www.youtube.com/watch?v=middle-unprocessed",
+                duration_seconds=900,
+            ),
+            ChannelVideo(
+                video_id="older-processed",
+                title="Older processed",
+                url="https://www.youtube.com/watch?v=older-processed",
+                duration_seconds=900,
+            ),
+        ]
+
+        selected = select_eligible_videos_for_source(
+            videos,
+            min_duration_seconds=600,
+            processed_video_ids={"newest-processed", "older-processed"},
+            source_seen_before=True,
+            stop_at_video_ids={"newest-processed", "older-processed"},
+        )
+
+        self.assertEqual([video.video_id for video in selected], ["middle-unprocessed"])
 
 
 if __name__ == "__main__":

@@ -21,6 +21,28 @@
       "min_duration_seconds": 600,
       "writer_profile": "market-commentary",
       "compare_evaluation": "none"
+    },
+    {
+      "type": "podcast_rss",
+      "name": "示例投研播客",
+      "url": "https://www.xiaoyuzhoufm.com/podcast/PODCAST_ID_HERE",
+      "rss_url": "https://rsshub.app/xiaoyuzhou/podcast/PODCAST_ID_HERE",
+      "enabled": false,
+      "series": "炼金投研",
+      "priority": 15,
+      "min_duration_seconds": 600,
+      "writer_profile": "deep-stock-analysis"
+    },
+    {
+      "type": "podcast_rss",
+      "name": "示例科技访谈播客",
+      "url": "https://www.xiaoyuzhoufm.com/podcast/ANOTHER_PODCAST_ID",
+      "rss_url": "https://rsshub.app/xiaoyuzhou/podcast/ANOTHER_PODCAST_ID",
+      "enabled": false,
+      "series": "炼金投研",
+      "priority": 30,
+      "min_duration_seconds": 600,
+      "writer_profile": "market-commentary"
     }
   ]
 }
