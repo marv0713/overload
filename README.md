@@ -1,12 +1,13 @@
 # overlord
 
-`overlord` 是一个本地优先的内容处理 MVP：从公开内容源抓取素材，转成适合微信公众号草稿箱的文章。当前第一条路径是 YouTube 频道到公众号草稿。
+`overlord` 是一个本地优先的内容处理 MVP：从公开内容源抓取素材，转成适合微信公众号草稿箱的文章。当前支持 YouTube 频道和播客 RSS（包括小宇宙/RSSHub）两类来源。
 
 ## 能做什么
 
 - 从单个 YouTube 视频 URL 获取元数据和字幕。
 - 从配置的 YouTube 频道里扫描候选视频。
-- 记录每个频道的处理进度，避免重复处理。
+- 从播客 RSS 中读取剧集，下载音频并转写。
+- 记录每个来源的处理进度，避免重复处理。
 - 按全局系列编号生成公众号文章。
 - 按不同博主/视频类型选择不同 writer profile。
 - 生成本地 `article.md`、`article.html`、`transcript.txt`、`meta.json` 和 `run.json`。
@@ -14,7 +15,7 @@
 
 ## 核心概念
 
-- **source**：内容来源适配器。当前是 `youtube_channel`，后续可扩展小宇宙、博客等。
+- **source**：内容来源适配器。当前支持 `youtube_channel` 和 `podcast_rss`。
 - **transcript**：供模型处理的正文文本，可能来自字幕、音频转写或正文抽取。
 - **writer profile**：写作模板。用于区分单公司深度拆解、市场评论、访谈等文章结构。
 - **processed store**：本地 JSON 进度记录，默认是 `data/processed.json`，不提交到仓库。
@@ -28,6 +29,7 @@ config/
   writer_profiles/              # 可提交的写作模板
 scripts/
   process_youtube.py            # 单视频入口
+  process_xiaoyuzhou.py         # 单个播客 RSS 剧集入口
   process_sources.py            # 配置来源批处理入口
   push_wechat_draft.py          # 推送微信公众号草稿
   generate_cover.py             # 生成封面图
@@ -49,6 +51,8 @@ python3 -m venv .venv
 ```
 
 系统还需要能运行 `yt-dlp`。依赖安装后，代码会优先使用环境里的 `yt-dlp`，找不到时会尝试 `python -m yt_dlp`。
+
+播客转写依赖 `faster-whisper`。第一次运行会下载 Whisper 模型，音频较长时处理会比较慢。
 
 ## 配置
 
@@ -80,9 +84,11 @@ cp config/sources.example.json config/sources.json
 
 `config/sources.json` 是本地配置，不提交。字段说明：
 
-- `type`：当前支持 `youtube_channel`。
+- `type`：当前支持 `youtube_channel`、`podcast_rss`。
 - `name`：来源名称。
-- `url`：YouTube 频道地址。
+- `url`：来源主页地址，例如 YouTube 频道页或小宇宙节目页。
+- `rss_url`：播客 RSS 地址，仅 `podcast_rss` 需要。小宇宙可使用 RSSHub 路由。
+- `enabled`：是否启用该来源。
 - `series`：公众号系列名。
 - `priority`：全局队列优先级，数字越小越先处理。
 - `min_duration_seconds`：过滤短视频。
@@ -115,6 +121,29 @@ PYTHONPATH=src .venv/bin/python scripts/process_sources.py --max-items 1
 PYTHONPATH=src .venv/bin/python scripts/process_sources.py --generate-article --max-items 1
 ```
 
+列出小宇宙/RSS 播客的最新剧集：
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/process_xiaoyuzhou.py \
+  --rss "https://rsshub.app/xiaoyuzhou/podcast/PODCAST_ID" \
+  --list
+```
+
+处理单个播客 RSS 的最新合格剧集，下载音频并转写：
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/process_xiaoyuzhou.py \
+  --rss "https://rsshub.app/xiaoyuzhou/podcast/PODCAST_ID"
+```
+
+处理单个播客剧集并调用 Gemini 生成文章：
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/process_xiaoyuzhou.py \
+  --rss "https://rsshub.app/xiaoyuzhou/podcast/PODCAST_ID" \
+  --generate-article
+```
+
 推送本地文章到微信公众号草稿箱：
 
 ```bash
@@ -140,9 +169,27 @@ PYTHONPATH=src .venv/bin/python scripts/generate_cover.py \
 
 - 所有来源共享同一个 `series` 编号，例如 `No.001`、`No.002`。
 - 先按 `priority` 排序。
-- 对已有处理记录的来源，只处理该来源最新已处理视频之后发布的新视频。
-- 对新加入、没有历史记录的来源，只选最新一条符合时长要求的视频，避免一次性回填旧内容。
+- 对已有处理记录的 YouTube 来源，会继续补处理历史记录之间漏掉的未处理视频，并按发布时间从旧到新处理。
+- 对已有处理记录的播客来源，会处理未处理且符合时长要求的剧集，并按发布时间从旧到新处理。
+- 对新加入、没有历史记录的来源，只选最新一条符合时长要求的内容，避免一次性回填旧内容。
 - 每次默认只处理 1 条，可通过 `--max-items` 调整。
+
+`process_sources.py` 的 `--output-dir` 是批处理输出根目录。默认值沿用早期 YouTube 路径 `outputs/youtube`；如果混合处理 YouTube 和播客，可以显式指定成 `outputs/sources`。
+
+单播客调试入口 `process_xiaoyuzhou.py` 默认输出到：
+
+```text
+outputs/
+  xiaoyuzhou/
+    <podcast_slug>/
+      <episode_id>/
+        audio/
+        transcript.txt
+        meta.json
+        article.md
+        article.html
+        run.json
+```
 
 ## Writer Profiles
 
