@@ -26,38 +26,52 @@ def generate_cover(
     issue: str = "",
     hook: str = "",
 ) -> None:
-    width, height = 900, 500
+    # 900×383 = 2.35:1  ← WeChat feed thumbnail standard ratio, no crop
+    width, height = 900, 383
     image = Image.new("RGB", (width, height), "#101113")
     draw = ImageDraw.Draw(image)
 
+    # Gradient background
     for y in range(height):
         shade = int(16 + y / height * 16)
         draw.line([(0, y), (width, y)], fill=(shade, shade, shade + 2))
 
     gold = "#d4af37"
     muted_gold = "#7b6425"
+
+    # Diagonal decorative lines
     for x in range(80, width, 140):
-        draw.line([(x, 80), (x + 90, 420)], fill=muted_gold, width=1)
-    for y in [120, 250, 380]:
-        draw.line([(90, y), (810, y - 20)], fill="#242424", width=2)
+        draw.line([(x, 40), (x + 70, height - 40)], fill=muted_gold, width=1)
+    for y in [90, 190, 300]:
+        draw.line([(90, y), (810, y - 15)], fill="#242424", width=2)
 
-    draw.rectangle((52, 52, width - 52, height - 52), outline=gold, width=3)
-    draw.rectangle((68, 68, width - 68, height - 68), outline="#4b3d19", width=1)
+    # Border frames
+    draw.rectangle((36, 36, width - 36, height - 36), outline=gold, width=3)
+    draw.rectangle((50, 50, width - 50, height - 50), outline="#4b3d19", width=1)
 
-    headline_font = _font(64)
-    issue_font = _font(28)
-    hook_font = _font(42)
-    subtitle_font = _font(30)
+    headline_font = _font(56)
+    issue_font    = _font(24)
+    hook_font     = _font(36)
+    subtitle_font = _font(26)
+
+    # Issue number — top left inside border
     if issue:
-        draw.text((92, 82), issue, font=issue_font, fill="#9c8a52")
-    _center_text(draw, (0, 152, width, 232), f"{column}：{ticker}", headline_font, gold)
+        draw.text((70, 60), issue, font=issue_font, fill="#9c8a52")
+
+    # Main headline: column：ticker  (centred vertically in upper half)
+    _center_text(draw, (0, 100, width, 180), f"{column}：{ticker}", headline_font, gold)
+
+    # Hook line (article title snippet) — middle band
     if hook:
-        _center_text(draw, (80, 250, width - 80, 322), hook, hook_font, "#f2f0e8")
+        _center_text(draw, (80, 190, width - 80, 270), hook, hook_font, "#f2f0e8")
+
+    # Subtitle — lower area
     if subtitle:
-        _center_text(draw, (0, 350, width, 390), subtitle, subtitle_font, "#c8b46b")
+        _center_text(draw, (0, 285, width, 340), subtitle, subtitle_font, "#c8b46b")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output)
+
 
 
 def _center_text(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font, fill: str) -> None:
