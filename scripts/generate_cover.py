@@ -10,6 +10,7 @@ def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
         "/System/Library/Fonts/PingFang.ttc",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         "/Library/Fonts/Arial Unicode.ttf",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     ]
     for path in candidates:
         if Path(path).exists():

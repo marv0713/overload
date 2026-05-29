@@ -510,6 +510,31 @@ def main() -> int:
             # If successfully generated an article and push is requested
             if args.push_draft and (output_dir / "article.md").exists():
                 cover_path = Path(args.cover) if args.cover else output_dir / "cover.png"
+                if not cover_path.exists():
+                    print(f"[{candidate.source.name}] Auto-generating default cover image...")
+                    import sys
+                    if str(Path("scripts").absolute()) not in sys.path and "scripts" not in sys.path:
+                        sys.path.append("scripts")
+                    from generate_cover import generate_cover
+                    
+                    # Try to extract the title from the generated article
+                    article_path = output_dir / "article.md"
+                    text = article_path.read_text(encoding="utf-8")
+                    import re
+                    title_match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
+                    title = title_match.group(1).strip() if title_match else candidate.item_title
+                    if not title:
+                        title = "最新研报"
+                        
+                    hook_text = (title[:16] + "...") if len(title) > 16 else title
+                    generate_cover(
+                        output=cover_path,
+                        column="炼金投研",
+                        ticker=candidate.source.name[:12],
+                        hook=hook_text,
+                        issue=""
+                    )
+                
                 if cover_path.exists():
                     print(f"[{candidate.source.name}] Pushing to WeChat draft box...")
                     # We can reuse the push logic from process_youtube by importing it locally
