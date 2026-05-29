@@ -180,6 +180,7 @@ class GeminiWriter(BaseWriter):
         title = meta.get("title", "")
         channel = meta.get("uploader") or meta.get("channel") or ""
         url = meta.get("webpage_url") or meta.get("url") or ""
+        issue = meta.get("issue")
         truncated = transcript[:_MAX_TRANSCRIPT_CHARS]
         profile_section = ""
         if self.profile_prompt:
@@ -189,11 +190,14 @@ class GeminiWriter(BaseWriter):
                 f"{self.profile_prompt}"
             )
 
+        issue_str = f"【注意】本期文章编号为 {issue}。请在输出“标题建议”和文章正文首行 Markdown 标题时，务必将编号加在最前面（例如「{issue} | 原标题」）。\n" if issue else ""
+
         return (
             f"{_WRITER_SYSTEM_PROMPT}{profile_section}\n\n"
             f"视频标题：{title}\n"
             f"频道/博主：{channel}\n"
-            f"视频链接：{url}\n\n"
+            f"视频链接：{url}\n"
+            f"{issue_str}\n"
             f"Transcript：\n\n{truncated}"
         )
 

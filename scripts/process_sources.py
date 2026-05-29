@@ -59,11 +59,14 @@ def process_video_url(
     gemini_model: str = "gemini-2.5-flash",
     model_size: str = "base",
     language: str = "zh",
+    issue: str = "",
 ) -> tuple[Path, dict]:
     video_id = extract_video_id(url)
     meta = fetch_info(url, no_check_certificates=no_check_certificates)
     meta.setdefault("video_id", video_id)
     meta.setdefault("url", url)
+    if issue:
+        meta["issue"] = issue
 
     run: dict = {
         "status": "ok",
@@ -72,6 +75,8 @@ def process_video_url(
         "article_status": "skipped",
         "writer_profile": writer_profile,
     }
+    if issue:
+        run["issue"] = issue
     try:
         transcript = fetch_transcript(
             url,
@@ -229,6 +234,9 @@ def process_candidate(
     if dry_run:
         return 0
 
+    tentative_issue_num = store._data.get("series", {}).get(source.series, {}).get("next_issue", 1)
+    tentative_issue = f"No.{tentative_issue_num:03d}"
+
     if candidate.video is not None:
         output_dir, run = process_video_url(
             candidate.video.url,
@@ -241,6 +249,7 @@ def process_candidate(
             gemini_model=gemini_model,
             model_size=model_size,
             language=language,
+            issue=tentative_issue,
         )
         item_id = candidate.video.video_id
         item_url = candidate.video.url
@@ -258,6 +267,7 @@ def process_candidate(
             gemini_model=gemini_model,
             model_size=model_size,
             language=language,
+            issue=tentative_issue,
         )
         item_id = ep.episode_id
         item_url = ep.episode_url
@@ -293,6 +303,7 @@ def process_episode(
     gemini_model: str = "gemini-2.5-flash",
     model_size: str = "base",
     language: str = "zh",
+    issue: str = "",
 ) -> tuple[Path, dict]:
     """Download, transcribe, and optionally write an article for one podcast episode."""
     output_dir = output_base / ep.episode_id
@@ -319,6 +330,8 @@ def process_episode(
         "article_status": "skipped",
         "writer_profile": writer_profile,
     }
+    if issue:
+        run["issue"] = issue
 
     # Download audio
     try:
@@ -478,6 +491,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Load environment variables into os.environ globally (for GeminiWriter etc)
+    from youtube_to_wechat.wechat import load_env
+    import os
+    env_vars = load_env(Path(args.env))
+    if env_vars:
+        os.environ.update(env_vars)
+
     try:
         config = load_source_config(Path(args.config))
         store = ProcessedStore(Path(args.store))
@@ -532,7 +552,7 @@ def main() -> int:
                         column="炼金投研",
                         ticker=candidate.source.name[:12],
                         hook=hook_text,
-                        issue=""
+                        issue=run.get("issue", "")
                     )
                 
                 if cover_path.exists():
