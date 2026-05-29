@@ -4,18 +4,60 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+_FONT_CANDIDATES = [
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/Library/Fonts/Arial Unicode.ttf",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+]
 
-def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    candidates = [
-        "/System/Library/Fonts/PingFang.ttc",
-        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-        "/Library/Fonts/Arial Unicode.ttf",
-        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-    ]
-    for path in candidates:
+
+def _find_font_path() -> str | None:
+    """Return the first available font path, or None."""
+    for path in _FONT_CANDIDATES:
         if Path(path).exists():
-            return ImageFont.truetype(path, size=size)
+            return path
+    return None
+
+
+def _font(size: int, font_path: str | None = None) -> ImageFont.FreeTypeFont:
+    path = font_path or _find_font_path()
+    if path:
+        return ImageFont.truetype(path, size=size)
     return ImageFont.load_default()
+
+
+def _center_text(
+    draw: ImageDraw.ImageDraw,
+    box: tuple,
+    text: str,
+    size: int,
+    fill: str,
+    font_path: str | None = None,
+    min_size: int = 18,
+) -> None:
+    """Draw text centred in *box*, auto-shrinking until it fits horizontally."""
+    left, top, right, bottom = box
+    max_width = right - left - 20  # 10px padding each side
+
+    current_size = size
+    while current_size >= min_size:
+        f = _font(current_size, font_path)
+        bbox = draw.textbbox((0, 0), text, font=f)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        if text_w <= max_width:
+            break
+        current_size -= 2
+    else:
+        f = _font(min_size, font_path)
+        bbox = draw.textbbox((0, 0), text, font=f)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+
+    x = left + (right - left - text_w) / 2
+    y = top + (bottom - top - text_h) / 2
+    draw.text((x, y), text, font=f, fill=fill)
 
 
 def generate_cover(
@@ -26,8 +68,10 @@ def generate_cover(
     issue: str = "",
     hook: str = "",
 ) -> None:
-    # 900×383 = 2.35:1  ← WeChat feed thumbnail standard ratio, no crop
+    # 900×383 = 2.35:1  ← WeChat feed thumbnail standard ratio
     width, height = 900, 383
+    font_path = _find_font_path()
+
     image = Image.new("RGB", (width, height), "#101113")
     draw = ImageDraw.Draw(image)
 
@@ -42,65 +86,34 @@ def generate_cover(
     # Diagonal decorative lines
     for x in range(80, width, 140):
         draw.line([(x, 40), (x + 70, height - 40)], fill=muted_gold, width=1)
-    for y in [90, 190, 300]:
-        draw.line([(90, y), (810, y - 15)], fill="#242424", width=2)
+    for y_pos in [90, 190, 300]:
+        draw.line([(90, y_pos), (810, y_pos - 15)], fill="#242424", width=2)
 
     # Border frames
     draw.rectangle((36, 36, width - 36, height - 36), outline=gold, width=3)
     draw.rectangle((50, 50, width - 50, height - 50), outline="#4b3d19", width=1)
 
-    headline_font = _font(56)
-    issue_font    = _font(24)
-    hook_font     = _font(36)
-    subtitle_font = _font(26)
-
-    # Issue number — top left inside border
+    # Issue number — top left
     if issue:
+        issue_font = _font(24, font_path)
         draw.text((70, 60), issue, font=issue_font, fill="#9c8a52")
 
-    # Main headline: column：ticker  (centred vertically in upper half)
-    _center_text(draw, (0, 100, width, 180), f"{column}：{ticker}", headline_font, gold)
+    # Main headline (auto-shrinks to fit)
+    _center_text(draw, (0, 95, width, 180), f"{column}：{ticker}",
+                 size=56, fill=gold, font_path=font_path)
 
-    # Hook line (article title snippet) — middle band
+    # Hook line
     if hook:
-        _center_text(draw, (80, 190, width - 80, 270), hook, hook_font, "#f2f0e8")
+        _center_text(draw, (80, 190, width - 80, 275), hook,
+                     size=36, fill="#f2f0e8", font_path=font_path)
 
-    # Subtitle — lower area
+    # Subtitle
     if subtitle:
-        _center_text(draw, (0, 285, width, 340), subtitle, subtitle_font, "#c8b46b")
+        _center_text(draw, (0, 285, width, 340), subtitle,
+                     size=26, fill="#c8b46b", font_path=font_path)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output)
-
-
-
-def _center_text(
-    draw: ImageDraw.ImageDraw,
-    box: tuple[int, int, int, int],
-    text: str,
-    font: ImageFont.FreeTypeFont,
-    fill: str,
-    min_size: int = 18,
-) -> None:
-    """Draw text centred inside *box*, auto-shrinking the font until it fits."""
-    left, top, right, bottom = box
-    max_width = right - left - 16   # 8px padding each side
-
-    # Auto-shrink: reduce size until text fits horizontally
-    current_font = font
-    while True:
-        bbox = draw.textbbox((0, 0), text, font=current_font)
-        text_width = bbox[2] - bbox[0]
-        if text_width <= max_width or current_font.size <= min_size:
-            break
-        current_font = ImageFont.truetype(current_font.path, size=current_font.size - 2)
-
-    bbox = draw.textbbox((0, 0), text, font=current_font)
-    text_width  = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    x = left + (right - left - text_width) / 2
-    y = top  + (bottom - top  - text_height) / 2
-    draw.text((x, y), text, font=current_font, fill=fill)
 
 
 def main() -> int:
