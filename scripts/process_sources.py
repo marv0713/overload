@@ -572,9 +572,14 @@ def main() -> int:
                     
                     title_match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
                     title = title_match.group(1).strip() if title_match else article_path.parent.name
-                    
+
                     digest_match = re.search(r"^> 摘要：(.+)$", text, re.MULTILINE)
-                    digest = digest_match.group(1).strip() if digest_match else text[:110].replace("\n", " ")
+                    if digest_match:
+                        digest = digest_match.group(1).strip()
+                    else:
+                        # Strip heading lines (starting with #) for the fallback digest
+                        body_lines = [l for l in text.splitlines() if l.strip() and not l.startswith("#")]
+                        digest = " ".join(body_lines)[:110]
                     
                     content = _markdown_to_html(text)
                     env = load_env(Path(args.env))

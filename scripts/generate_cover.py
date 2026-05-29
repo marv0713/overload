@@ -74,14 +74,33 @@ def generate_cover(
 
 
 
-def _center_text(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font, fill: str) -> None:
+def _center_text(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill: str,
+    min_size: int = 18,
+) -> None:
+    """Draw text centred inside *box*, auto-shrinking the font until it fits."""
     left, top, right, bottom = box
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_width = bbox[2] - bbox[0]
+    max_width = right - left - 16   # 8px padding each side
+
+    # Auto-shrink: reduce size until text fits horizontally
+    current_font = font
+    while True:
+        bbox = draw.textbbox((0, 0), text, font=current_font)
+        text_width = bbox[2] - bbox[0]
+        if text_width <= max_width or current_font.size <= min_size:
+            break
+        current_font = ImageFont.truetype(current_font.path, size=current_font.size - 2)
+
+    bbox = draw.textbbox((0, 0), text, font=current_font)
+    text_width  = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
     x = left + (right - left - text_width) / 2
-    y = top + (bottom - top - text_height) / 2
-    draw.text((x, y), text, font=font, fill=fill)
+    y = top  + (bottom - top  - text_height) / 2
+    draw.text((x, y), text, font=current_font, fill=fill)
 
 
 def main() -> int:
