@@ -12,7 +12,6 @@ __pycache__/
 
 outputs/
 data/
-!data/processed.json
 
 .context/
 .claude/
