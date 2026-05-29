@@ -532,23 +532,24 @@ def main() -> int:
                 cover_path = Path(args.cover) if args.cover else output_dir / "cover.png"
                 if not cover_path.exists():
                     print(f"[{candidate.source.name}] Auto-generating default cover image...")
-                    import sys
-                    if str(Path("scripts").absolute()) not in sys.path and "scripts" not in sys.path:
-                        sys.path.append("scripts")
+                    import sys as _sys
+                    if str(Path("scripts").absolute()) not in _sys.path and "scripts" not in _sys.path:
+                        _sys.path.append("scripts")
                     from generate_cover import generate_cover
-                    
-                    # Try to extract the title from the generated article
+                    import re as _re
+                    import json as _json
+
+                    # Try to extract title from the generated article
                     article_path = output_dir / "article.md"
                     text = article_path.read_text(encoding="utf-8")
-                    import re
-                    title_match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
+                    title_match = _re.search(r"^#\s+(.+)$", text, _re.MULTILINE)
                     title = title_match.group(1).strip() if title_match else candidate.item_title
                     if not title:
                         title = "最新研报"
-                        
+
                     hook_text = (title[:16] + "...") if len(title) > 16 else title
                     run_json_path = output_dir / "run.json"
-                    _run_data = json.loads(run_json_path.read_text(encoding="utf-8")) if run_json_path.exists() else {}
+                    _run_data = _json.loads(run_json_path.read_text(encoding="utf-8")) if run_json_path.exists() else {}
                     generate_cover(
                         output=cover_path,
                         column="炼金投研",
