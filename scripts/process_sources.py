@@ -547,12 +547,14 @@ def main() -> int:
                         title = "最新研报"
                         
                     hook_text = (title[:16] + "...") if len(title) > 16 else title
+                    run_json_path = output_dir / "run.json"
+                    _run_data = json.loads(run_json_path.read_text(encoding="utf-8")) if run_json_path.exists() else {}
                     generate_cover(
                         output=cover_path,
                         column="炼金投研",
                         ticker=candidate.source.name[:12],
                         hook=hook_text,
-                        issue=run.get("issue", "")
+                        issue=_run_data.get("issue", "")
                     )
                 
                 if cover_path.exists():
