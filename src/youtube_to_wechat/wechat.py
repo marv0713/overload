@@ -164,9 +164,22 @@ def build_draft_article(
     thumb_media_id: str,
     column: str,
     source_url: str = "",
+    open_comment: bool = True,
+    ai_generated: bool = True,
 ) -> dict[str, Any]:
     clean_title = title.replace(f"{column}｜", "").replace(f"{column} |", "").strip()
     final_title = f"{column}｜{clean_title}"
+
+    if ai_generated:
+        ai_notice = (
+            '<p style="color:#888888;font-size:13px;border-left:3px solid #d4af37;'
+            'padding:6px 10px;margin:0 0 16px 0;">'
+            '⚠️ 本文由 AI 辅助对海外公开资讯进行整理输出，经人工审阅后发布。'
+            '内容仅供参考，不构成投资建议。'
+            '</p>'
+        )
+        content = ai_notice + content
+
     return {
         "title": final_title[:64],
         "author": author,
@@ -174,7 +187,7 @@ def build_draft_article(
         "content": content,
         "content_source_url": source_url,
         "thumb_media_id": thumb_media_id,
-        "need_open_comment": 0,
+        "need_open_comment": 1 if open_comment else 0,
         "only_fans_can_comment": 0,
     }
 
