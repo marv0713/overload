@@ -57,6 +57,8 @@ def process_video_url(
     writer_profile: str = "deep-stock-analysis",
     writer_profile_dir: Path = Path("config/writer_profiles"),
     gemini_model: str = "gemini-2.5-flash",
+    model_size: str = "base",
+    language: str = "zh",
 ) -> tuple[Path, dict]:
     video_id = extract_video_id(url)
     meta = fetch_info(url, no_check_certificates=no_check_certificates)
@@ -99,6 +101,20 @@ def process_video_url(
         run["status"] = "error"
     elif run["transcript_status"] != "ok" or run["audio_status"] != "ok":
         run["status"] = "partial"
+
+    # --- Whisper Fallback ---
+    if not transcript and run.get("audio_path"):
+        print(f"[{video_id}] No subtitle found, falling back to Whisper transcription...")
+        from youtube_to_wechat.transcriber import FasterWhisperTranscriber, TranscriberError
+        try:
+            transcriber = FasterWhisperTranscriber(model_size=model_size, language=language if language else None)
+            transcript = transcriber.transcribe(Path(run["audio_path"]))
+            run["transcript_status"] = "ok (whisper fallback)"
+            # Update status since we now have transcript
+            run["status"] = "ok" if run["audio_status"] == "ok" else "partial"
+        except TranscriberError as exc:
+            run["transcript_status"] = "error"
+            run["transcript_error"] = f"Whisper fallback failed: {exc}"
 
     output_dir = write_outputs(output_base, video_id, meta, transcript, run=run)
     if generate_article and transcript:
@@ -223,6 +239,8 @@ def process_candidate(
             writer_profile=source.writer_profile,
             writer_profile_dir=writer_profile_dir,
             gemini_model=gemini_model,
+            model_size=model_size,
+            language=language,
         )
         item_id = candidate.video.video_id
         item_url = candidate.video.url
@@ -449,6 +467,9 @@ def main() -> int:
     parser.add_argument("--generate-article", action="store_true", help="Generate article.md using each source writer_profile")
     parser.add_argument("--writer-profile-dir", default="config/writer_profiles", help="Directory containing writer profile Markdown files")
     parser.add_argument("--gemini-model", default="gemini-2.5-flash", help="Gemini model used when --generate-article is set")
+    parser.add_argument("--push-draft", action="store_true", help="Push generated article to WeChat draft box after generation")
+    parser.add_argument("--cover", default="", help="Path to default cover image for WeChat draft push")
+    parser.add_argument("--env", default=".env", help="Path to .env file for WeChat credentials")
     parser.add_argument("--dry-run", action="store_true", help="Print selected videos without processing")
     parser.add_argument(
         "--no-check-certificates",
@@ -468,7 +489,14 @@ def main() -> int:
             no_check_certificates=args.no_check_certificates,
         )
         for candidate in candidates[: args.max_items]:
-            processed_count += process_candidate(
+            processed_count += 1
+            output_dir = None
+            if candidate.video is not None:
+                output_dir = Path(args.output_dir) / candidate.source_slug / candidate.video.video_id
+            else:
+                output_dir = Path(args.output_dir) / candidate.source_slug / candidate.episode.episode_id
+                
+            process_candidate(
                 candidate=candidate,
                 store=store,
                 output_base=Path(args.output_dir),
@@ -478,6 +506,87 @@ def main() -> int:
                 writer_profile_dir=Path(args.writer_profile_dir),
                 gemini_model=args.gemini_model,
             )
+            
+            # If successfully generated an article and push is requested
+            if args.push_draft and (output_dir / "article.md").exists():
+                cover_path = Path(args.cover) if args.cover else output_dir / "cover.png"
+                if cover_path.exists():
+                    print(f"[{candidate.source.name}] Pushing to WeChat draft box...")
+                    # We can reuse the push logic from process_youtube by importing it locally
+                    from youtube_to_wechat.wechat import (
+                        WechatError, add_draft, build_draft_article, get_access_token,
+                        load_env, require_env, upload_permanent_thumb, _markdown_to_html,
+                    )
+                    import re
+                    
+                    article_path = output_dir / "article.md"
+                    text = article_path.read_text(encoding="utf-8")
+                    
+                    title_match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
+                    title = title_match.group(1).strip() if title_match else article_path.parent.name
+                    
+                    digest_match = re.search(r"^> 摘要：(.+)$", text, re.MULTILINE)
+                    digest = digest_match.group(1).strip() if digest_match else text[:110].replace("\n", " ")
+                    
+                    content = _markdown_to_html(text)
+                    env = load_env(Path(args.env))
+                    required = require_env(env, ["WECHAT_APPID", "WECHAT_APPSECRET", "WECHAT_AUTHOR"])
+                    
+                    try:
+                        token = get_access_token(required["WECHAT_APPID"], required["WECHAT_APPSECRET"])
+                        thumb_media_id = upload_permanent_thumb(token, cover_path)
+                        article_payload = build_draft_article(
+                            title=title,
+                            author=required["WECHAT_AUTHOR"],
+                            digest=digest,
+                            content=content,
+                            thumb_media_id=thumb_media_id,
+                            column="炼金投研",
+                        )
+                        media_id = add_draft(token, article_payload)
+                        print(f"[{candidate.source.name}] WeChat draft created: {media_id}")
+                        # --- WeCom Notification ---
+                        wecom_webhook = env.get("WECOM_WEBHOOK")
+                        if wecom_webhook:
+                            import urllib.request as _ur
+                            import json
+                            msg = {
+                                "msgtype": "markdown",
+                                "markdown": {
+                                    "content": f"🎉 **新文章草稿已生成并推送**\n\n> **来源**: {candidate.source.name}\n> **标题**: {title}\n> **操作**: 请前往微信公众号后台草稿箱预览并群发。"
+                                }
+                            }
+                            req = _ur.Request(wecom_webhook, data=json.dumps(msg).encode('utf-8'), headers={'Content-Type': 'application/json'})
+                            try:
+                                _ur.urlopen(req, timeout=10)
+                                print(f"[{candidate.source.name}] WeCom notification sent.")
+                            except Exception as e:
+                                print(f"[{candidate.source.name}] warning: Failed to send WeCom notification: {e}", file=sys.stderr)
+
+                        # --- PushPlus Notification ---
+                        pushplus_token = env.get("PUSHPLUS_TOKEN")
+                        if pushplus_token:
+                            import urllib.request as _ur
+                            import json
+                            # PushPlus supports markdown
+                            msg = {
+                                "token": pushplus_token,
+                                "title": "🎉 炼金投研：新文章已推送草稿箱",
+                                "content": f"**来源**: {candidate.source.name}\n\n**标题**: {title}\n\n请前往微信公众号后台草稿箱预览并群发。",
+                                "template": "markdown"
+                            }
+                            req = _ur.Request("http://www.pushplus.plus/send", data=json.dumps(msg).encode('utf-8'), headers={'Content-Type': 'application/json'})
+                            try:
+                                _ur.urlopen(req, timeout=10)
+                                print(f"[{candidate.source.name}] PushPlus notification sent.")
+                            except Exception as e:
+                                print(f"[{candidate.source.name}] warning: Failed to send PushPlus notification: {e}", file=sys.stderr)
+                                
+                    except WechatError as exc:
+                        print(f"[{candidate.source.name}] error: WeChat push failed: {exc}", file=sys.stderr)
+                else:
+                    print(f"[{candidate.source.name}] warning: cover image not found, skipping push", file=sys.stderr)
+
     except (OSError, ValueError, YtDlpError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
