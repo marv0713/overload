@@ -89,6 +89,8 @@ class JSONDictStore(BaseProcessedStore):
         return source_slug in self._data.get("sources", {})
 
     def allocate_issue(self, series: str) -> str:
+        if not series:
+            return ""
         series_record = self._data.setdefault("series", {}).setdefault(
             series, {"next_issue": 1}
         )
@@ -98,6 +100,8 @@ class JSONDictStore(BaseProcessedStore):
         return f"No.{issue_number:03d}"
 
     def get_current_issue(self, series: str) -> str:
+        if not series:
+            return ""
         series_record = self._data.get("series", {}).get(series, {"next_issue": 1})
         issue_number = max(1, int(series_record.get("next_issue", 1)) - 1)
         return f"No.{issue_number:03d}"

@@ -235,8 +235,8 @@ def process_candidate(
     if dry_run:
         return 0
 
-    tentative_issue_num = store._data.get("series", {}).get(source.series, {}).get("next_issue", 1)
-    tentative_issue = f"No.{tentative_issue_num:03d}"
+    tentative_issue_num = store._data.get("series", {}).get(source.series, {}).get("next_issue", 1) if source.series else 0
+    tentative_issue = f"No.{tentative_issue_num:03d}" if source.series else ""
 
     if candidate.video is not None:
         output_dir, run = process_video_url(
@@ -288,7 +288,8 @@ def process_candidate(
             issue=issue,
             writer_profile=source.writer_profile,
         )
-        print(f"[issue] {source.series}: {issue}")
+        if issue:
+            print(f"[issue] {source.series}: {issue}")
     print(f"[done] {source.name}: {run['status']} -> {output_dir}")
     return 1
 
@@ -466,7 +467,8 @@ def process_source(
             issue=issue,
             writer_profile=source.writer_profile,
         )
-        print(f"[issue] {source.series}: {issue}")
+        if issue:
+            print(f"[issue] {source.series}: {issue}")
     print(f"[done] {source.name}: {run['status']} -> {output_dir}")
     return 1
 
