@@ -138,6 +138,21 @@ _WRITER_SYSTEM_PROMPT = """\
 - 不要在正文开头输出免责声明；免责声明只允许出现在「来源说明」末尾。
 """
 
+_GENERAL_SYSTEM_PROMPT = """\
+你是一个专业、客观的内容分析助手。
+你的任务：根据提供的视频标题和文字转录，提取核心干货，输出一篇结构清晰、语言精炼的总结笔记。
+必须保持客观中立，所有观点必须归因于视频本身，不能出现“公众号”、“本期栏目”、“小编”等字眼。
+
+## 格式约定 (必须遵守)
+- 语气客观精炼，剔除所有客套话。
+- 摘要单独在文章最后一行以 `> 摘要：` 开头输出（不超过 120 字）。
+- 另起一行，以 `> 标题建议：` 开头输出建议的标题。
+- 另起一行，以 `> 标签：` 开头，输出 3-5 个适合归档的标签（带#号）。
+- 另起一行，以 `> 图表数据：` 开头，输出单行 JSON 格式。
+- 另起一行，以 `> 核查点：` 开头，用 | 分隔。
+- 不要输出 markdown 代码块包裹，直接输出正文。
+"""
+
 _MAX_TRANSCRIPT_CHARS = 12_000
 
 
@@ -182,18 +197,24 @@ class GeminiWriter(BaseWriter):
         url = meta.get("webpage_url") or meta.get("url") or ""
         issue = meta.get("issue")
         truncated = transcript[:_MAX_TRANSCRIPT_CHARS]
+        
+        # Decide base persona based on profile
+        if self.profile_name in ["alchemy-research", "market-commentary", "deep-stock-analysis"]:
+            base_prompt = _WRITER_SYSTEM_PROMPT
+        else:
+            base_prompt = _GENERAL_SYSTEM_PROMPT
+            
         profile_section = ""
         if self.profile_prompt:
             profile_section = (
-                "\n\n## 当前 writer profile\n"
-                f"writer_profile：{self.profile_name}\n\n"
+                "\n\n## 当前执行要求\n"
                 f"{self.profile_prompt}"
             )
 
         issue_str = f"【注意】本期文章编号为 {issue}。请在输出“标题建议”和文章正文首行 Markdown 标题时，务必将编号加在最前面（例如「{issue} | 原标题」）。\n" if issue else ""
 
         return (
-            f"{_WRITER_SYSTEM_PROMPT}{profile_section}\n\n"
+            f"{base_prompt}{profile_section}\n\n"
             f"视频标题：{title}\n"
             f"频道/博主：{channel}\n"
             f"视频链接：{url}\n"
