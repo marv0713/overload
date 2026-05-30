@@ -18,7 +18,7 @@
 - **source**：内容来源适配器。当前支持 `youtube_channel` 和 `podcast_rss`。
 - **transcript**：供模型处理的正文文本，可能来自字幕、音频转写或正文抽取。
 - **writer profile**：写作模板。用于区分单公司深度拆解、市场评论、访谈等文章结构。
-- **processed store**：本地 JSON 进度记录，默认是 `data/processed.json`，不提交到仓库。
+- **processed store**：进度记录与状态管理。支持本地 `data/processed.json` 或云端 Supabase PostgreSQL 数据库。
 - **compare evaluation**：字幕和音频转写的对比评估流程，不是默认发布路径。
 
 ## 目录结构
@@ -27,6 +27,8 @@
 config/
   sources.example.json          # 可提交的示例来源配置
   writer_profiles/              # 可提交的写作模板
+docs/
+  cloud_architecture.md         # 云端架构与数据库配置说明
 scripts/
   process_youtube.py            # 单视频入口
   process_xiaoyuzhou.py         # 单个播客 RSS 剧集入口
@@ -68,6 +70,12 @@ cp .env.example .env
 GEMINI_API_KEY=
 ```
 
+需要启用云端多端同步与动态配置（推荐）时配置：
+
+```text
+SUPABASE_DB_URL=postgresql://<user>:<password>@<host>:<port>/postgres
+```
+
 需要推送公众号草稿时再配置：
 
 ```text
@@ -82,7 +90,9 @@ WECHAT_AUTHOR=
 cp config/sources.example.json config/sources.json
 ```
 
-`config/sources.json` 是本地配置，不提交。字段说明：
+如果你配置了 `SUPABASE_DB_URL`，系统将直接连接云端数据库（参考 `docs/cloud_architecture.md`），读取云端配置与 Prompt，本地配置将仅作为未联网时的降级备用（Fallback）。
+
+`config/sources.json`（或云端配置）字段说明：
 
 - `type`：当前支持 `youtube_channel`、`podcast_rss`。
 - `name`：来源名称。
