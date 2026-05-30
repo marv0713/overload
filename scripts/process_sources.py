@@ -9,6 +9,7 @@ from pathlib import Path
 
 from youtube_to_wechat.output import write_article, write_outputs
 from youtube_to_wechat.processed_store import BaseProcessedStore, create_store, slugify_source_name
+from youtube_to_wechat.source_config import SourceConfig, load_source_config
 from youtube_to_wechat.writer import GeminiWriter, WriterError
 from youtube_to_wechat.writer_profiles import load_writer_profile
 from youtube_to_wechat.xiaoyuzhou import (
