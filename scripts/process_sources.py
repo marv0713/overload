@@ -2,13 +2,13 @@
 """Process latest eligible items from configured sources (YouTube channels and Xiaoyuzhou podcasts)."""
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from youtube_to_wechat.output import write_article, write_outputs
-from youtube_to_wechat.processed_store import ProcessedStore, slugify_source_name
-from youtube_to_wechat.source_config import SourceConfig, load_source_config
+from youtube_to_wechat.processed_store import BaseProcessedStore, create_store, slugify_source_name
 from youtube_to_wechat.writer import GeminiWriter, WriterError
 from youtube_to_wechat.writer_profiles import load_writer_profile
 from youtube_to_wechat.xiaoyuzhou import (
@@ -148,7 +148,7 @@ def process_video_url(
 
 def collect_source_candidates(
     sources: list[SourceConfig],
-    store: ProcessedStore,
+    store: BaseProcessedStore,
     channel_limit: int,
     no_check_certificates: bool,
 ) -> list[SourceCandidate]:
@@ -219,7 +219,7 @@ def collect_source_candidates(
 
 def process_candidate(
     candidate: SourceCandidate,
-    store: ProcessedStore,
+    store: BaseProcessedStore,
     output_base: Path,
     no_check_certificates: bool,
     dry_run: bool,
@@ -400,7 +400,7 @@ def process_episode(
 
 def process_source(
     source: SourceConfig,
-    store: ProcessedStore,
+    store: BaseProcessedStore,
     output_base: Path,
     channel_limit: int,
     no_check_certificates: bool,
@@ -500,7 +500,8 @@ def main() -> int:
 
     try:
         config = load_source_config(Path(args.config))
-        store = ProcessedStore(Path(args.store))
+        db_url = os.environ.get("SUPABASE_DB_URL")
+        store = create_store(args.store, db_url)
         processed_count = 0
         candidates = collect_source_candidates(
             sources=config.sources,

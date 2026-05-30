@@ -1,5 +1,6 @@
 import json
 import re
+from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,10 +13,64 @@ def slugify_source_name(name: str) -> str:
     return slug or "source"
 
 
-class ProcessedStore:
-    def __init__(self, path: Path) -> None:
-        self.path = path
+class BaseProcessedStore(ABC):
+    @abstractmethod
+    def is_processed(self, video_id: str) -> bool: ...
+
+    @abstractmethod
+    def processed_video_ids(self) -> set[str]: ...
+
+    @abstractmethod
+    def processed_video_ids_for_source(self, source_slug: str) -> set[str]: ...
+
+    @abstractmethod
+    def has_source(self, source_slug: str) -> bool: ...
+
+    @abstractmethod
+    def allocate_issue(self, series: str) -> str: ...
+
+    @abstractmethod
+    def get_current_issue(self, series: str) -> str: ...
+
+    @abstractmethod
+    def processing_record(self, video_id: str) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def source_record(self, source_slug: str) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def record_source_scan(
+        self, source_name: str, source_slug: str, videos: list[ChannelVideo]
+    ) -> None: ...
+
+    @abstractmethod
+    def mark_processed(
+        self,
+        video_id: str,
+        source_name: str,
+        source_slug: str,
+        title: str,
+        url: str,
+        output_dir: str,
+        status: str,
+        series: str = "",
+        issue: str = "",
+        writer_profile: str = "",
+        ticker: str = "",
+        cover_hook: str = "",
+    ) -> None: ...
+
+
+class JSONDictStore(BaseProcessedStore):
+    """Shared implementation for any store that manages state as a single JSON dict."""
+    def __init__(self) -> None:
         self._data = self._load()
+
+    @abstractmethod
+    def _load(self) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def _save(self) -> None: ...
 
     def is_processed(self, video_id: str) -> bool:
         return video_id in self._data.get("processed_videos", {})
@@ -112,6 +167,12 @@ class ProcessedStore:
         self._data.setdefault("processed_videos", {})[video_id] = record
         self._save()
 
+
+class LocalProcessedStore(JSONDictStore):
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        super().__init__()
+
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self._data, ensure_ascii=False, indent=2) + "\n")
@@ -122,5 +183,54 @@ class ProcessedStore:
         return json.loads(self.path.read_text(encoding="utf-8"))
 
 
+class SupabaseProcessedStore(JSONDictStore):
+    def __init__(self, db_url: str) -> None:
+        import psycopg2
+        self.db_url = db_url
+        self._ensure_table()
+        super().__init__()
+
+    def _ensure_table(self):
+        import psycopg2
+        with psycopg2.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS overlord_state (
+                        key VARCHAR PRIMARY KEY,
+                        value JSONB
+                    );
+                """)
+            conn.commit()
+
+    def _save(self) -> None:
+        import psycopg2
+        import json
+        with psycopg2.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO overlord_state (key, value)
+                    VALUES ('state', %s)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+                """, (json.dumps(self._data, ensure_ascii=False),))
+            conn.commit()
+
+    def _load(self) -> dict[str, Any]:
+        import psycopg2
+        with psycopg2.connect(self.db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM overlord_state WHERE key = 'state';")
+                row = cur.fetchone()
+                if row and row[0]:
+                    return row[0]
+        return {"sources": {}, "processed_videos": {}, "series": {}}
+
+
+def create_store(path: str | Path, db_url: str | None = None) -> BaseProcessedStore:
+    if db_url:
+        return SupabaseProcessedStore(db_url)
+    return LocalProcessedStore(Path(path))
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+ProcessedStore = LocalProcessedStore
