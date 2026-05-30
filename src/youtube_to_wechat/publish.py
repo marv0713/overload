@@ -1,0 +1,126 @@
+import json
+import re
+import sys
+import urllib.request
+from pathlib import Path
+from typing import Protocol
+
+from youtube_to_wechat.wechat import (
+    WechatError,
+    _markdown_to_html,
+    add_draft,
+    build_draft_article,
+    get_access_token,
+    require_env,
+    upload_permanent_thumb,
+)
+
+
+class Publisher(Protocol):
+    def publish(self, source_name: str, issue: str, article_path: Path, cover_path: Path, env: dict) -> None:
+        ...
+
+
+class WechatDraftPublisher:
+    """Pushes article to WeChat Official Account as a draft."""
+    def publish(self, source_name: str, issue: str, article_path: Path, cover_path: Path, env: dict) -> None:
+        if not cover_path.exists():
+            print(f"[{source_name}] WechatDraftPublisher: missing cover image at {cover_path}, skipping.", file=sys.stderr)
+            return
+
+        text = article_path.read_text(encoding="utf-8")
+        title_match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
+        title = title_match.group(1).strip() if title_match else article_path.parent.name
+
+        digest_match = re.search(r"^> 摘要：(.+)$", text, re.MULTILINE)
+        if digest_match:
+            digest = digest_match.group(1).strip()
+        else:
+            body_lines = [l for l in text.splitlines() if l.strip() and not l.startswith("#")]
+            digest = " ".join(body_lines)[:110]
+
+        content = _markdown_to_html(text)
+        required = require_env(env, ["WECHAT_APPID", "WECHAT_APPSECRET", "WECHAT_AUTHOR"])
+
+        try:
+            token = get_access_token(required["WECHAT_APPID"], required["WECHAT_APPSECRET"])
+            thumb_media_id = upload_permanent_thumb(token, cover_path)
+            article_payload = build_draft_article(
+                title=title,
+                author=required["WECHAT_AUTHOR"],
+                digest=digest,
+                content=content,
+                thumb_media_id=thumb_media_id,
+                column="炼金投研",
+            )
+            media_id = add_draft(token, article_payload)
+            print(f"[{source_name}] WechatDraftPublisher: draft created {media_id}")
+            
+            # Send notification alerts if configured
+            self._send_alerts(source_name, title, env)
+        except WechatError as exc:
+            print(f"[{source_name}] WechatDraftPublisher Error: {exc}", file=sys.stderr)
+
+    def _send_alerts(self, source_name: str, title: str, env: dict) -> None:
+        wecom_webhook = env.get("WECOM_WEBHOOK")
+        if wecom_webhook:
+            msg = {
+                "msgtype": "markdown",
+                "markdown": {
+                    "content": f"🎉 **新文章草稿已生成并推送**\n\n> **来源**: {source_name}\n> **标题**: {title}\n> **操作**: 请前往微信公众号后台草稿箱预览并群发。"
+                }
+            }
+            req = urllib.request.Request(wecom_webhook, data=json.dumps(msg).encode('utf-8'), headers={'Content-Type': 'application/json'})
+            try:
+                urllib.request.urlopen(req, timeout=10)
+                print(f"[{source_name}] WeCom alert sent.")
+            except Exception as e:
+                print(f"[{source_name}] WeCom alert failed: {e}", file=sys.stderr)
+
+
+class PushPlusPublisher:
+    """Pushes the full article Markdown text to personal WeChat via PushPlus."""
+    def publish(self, source_name: str, issue: str, article_path: Path, cover_path: Path, env: dict) -> None:
+        token = env.get("PUSHPLUS_TOKEN")
+        if not token:
+            print(f"[{source_name}] PushPlusPublisher: PUSHPLUS_TOKEN missing in env.", file=sys.stderr)
+            return
+
+        text = article_path.read_text(encoding="utf-8")
+        title_match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
+        title = title_match.group(1).strip() if title_match else f"{source_name} 最新内容"
+
+        # PushPlus has length limits. Let's safely truncate at 15000 characters just in case.
+        if len(text) > 15000:
+            text = text[:15000] + "\n\n...(文章过长已截断)..."
+
+        # Prepend some meta
+        full_content = f"**来源：** {source_name}\n**期号：** {issue}\n\n---\n\n{text}"
+
+        msg = {
+            "token": token,
+            "title": f"[{source_name}] {title[:20]}...",
+            "content": full_content,
+            "template": "markdown"
+        }
+        req = urllib.request.Request("http://www.pushplus.plus/send", data=json.dumps(msg).encode('utf-8'), headers={'Content-Type': 'application/json'})
+        try:
+            urllib.request.urlopen(req, timeout=10)
+            print(f"[{source_name}] PushPlusPublisher: Full article delivered successfully.")
+        except Exception as e:
+            print(f"[{source_name}] PushPlusPublisher Error: {e}", file=sys.stderr)
+
+
+_PUBLISHERS: dict[str, Publisher] = {
+    "wechat_draft": WechatDraftPublisher(),
+    "pushplus": PushPlusPublisher(),
+}
+
+
+def publish_article(destination: str, source_name: str, issue: str, article_path: Path, cover_path: Path, env: dict) -> None:
+    """Entry point to route to the correct publisher based on destination identifier."""
+    publisher = _PUBLISHERS.get(destination)
+    if not publisher:
+        print(f"[{source_name}] Unknown destination '{destination}', skipping.", file=sys.stderr)
+        return
+    publisher.publish(source_name, issue, article_path, cover_path, env)

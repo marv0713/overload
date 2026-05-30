@@ -19,6 +19,7 @@ class SourceConfig:
     writer_profile: str = "alchemy-research"
     compare_evaluation: str = "none"
     rss_url: str = ""  # Required for podcast_rss sources
+    destinations: list[str] = field(default_factory=lambda: ["wechat_draft"])
 
 
 @dataclass
@@ -60,4 +61,5 @@ def _source_from_dict(data: dict[str, Any]) -> SourceConfig:
         writer_profile=data.get("writer_profile", "alchemy-research"),
         compare_evaluation=data.get("compare_evaluation", "none"),
         rss_url=data.get("rss_url", ""),
+        destinations=data.get("destinations", ["wechat_draft"]),
     )
