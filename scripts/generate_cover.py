@@ -57,70 +57,105 @@ def generate_cover(
     # Safe zone for text to avoid WeChat cropping (keep text within 600px width in center)
     safe_left = 150
     safe_right = width - 150
+    max_text_width = safe_right - safe_left
 
-    # Issue number — top left inside border (keep this at the absolute edge)
+    # Issue number — top left inside border
     if issue:
         draw.text((70, 60), issue, font=issue_font, fill="#9c8a52")
 
-    # Main headline: column：ticker  (centred vertically in upper half)
-    _center_text_wrapped(draw, (safe_left, 80, safe_right, 180), f"{column}：{ticker}", headline_font, gold)
-
-    # Hook line (article title snippet) — middle band
+    # Prepare stacked elements
+    elements = []
+    
+    # 1. Headline (Gold)
+    if ticker or column:
+        headline_lines = _wrap_text(draw, f"{column}：{ticker}", headline_font, max_text_width, max_lines=2)
+        elements.append({"lines": headline_lines, "font": headline_font, "fill": gold})
+        
+    # 2. Hook (White)
     if hook:
-        _center_text_wrapped(draw, (safe_left, 180, safe_right, 290), hook, hook_font, "#f2f0e8", max_lines=2)
-
-    # Subtitle — lower area
+        hook_lines = _wrap_text(draw, hook, hook_font, max_text_width, max_lines=3)
+        elements.append({"lines": hook_lines, "font": hook_font, "fill": "#f2f0e8"})
+        
+    # 3. Subtitle (Light Gold)
     if subtitle:
-        _center_text_wrapped(draw, (safe_left, 290, safe_right, 340), subtitle, subtitle_font, "#c8b46b", max_lines=1)
+        subtitle_lines = _wrap_text(draw, subtitle, subtitle_font, max_text_width, max_lines=1)
+        elements.append({"lines": subtitle_lines, "font": subtitle_font, "fill": "#c8b46b"})
+
+    # Calculate total height of the stack
+    element_spacing = 20
+    line_spacing = 10
+    total_h = 0
+    
+    for el in elements:
+        font = el["font"]
+        lines = el["lines"]
+        for line in lines:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            total_h += bbox[3] - bbox[1]
+        total_h += line_spacing * (len(lines) - 1)
+    total_h += element_spacing * (len(elements) - 1)
+
+    # Start drawing vertically centered
+    current_y = (height - total_h) / 2
+    
+    for el in elements:
+        font = el["font"]
+        lines = el["lines"]
+        fill = el["fill"]
+        for line in lines:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            line_w = bbox[2] - bbox[0]
+            line_h = bbox[3] - bbox[1]
+            x = safe_left + (max_text_width - line_w) / 2
+            draw.text((x, current_y), line, font=font, fill=fill)
+            current_y += line_h + line_spacing
+        current_y += element_spacing - line_spacing  # Adjust spacing between elements
 
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output)
 
 
-def _center_text_wrapped(
+def _wrap_text(
     draw: ImageDraw.ImageDraw,
-    box: tuple[int, int, int, int],
     text: str,
     font: ImageFont.FreeTypeFont,
-    fill: str,
-    max_lines: int = 3,
-) -> None:
-    """Draw text centred inside *box*, wrapping it automatically into multiple lines."""
-    left, top, right, bottom = box
-    max_width = right - left
-    
-    # Auto-wrap logic
+    max_width: int,
+    max_lines: int,
+) -> list[str]:
+    """Wrap text to fit within max_width, returning a list of lines."""
     wrapped_lines = []
     current_line = ""
+    # Simple word wrapping that respects English words and Chinese chars
+    words = []
+    current_word = ""
     for char in text:
-        test_line = current_line + char
+        if char.isascii() and not char.isspace():
+            current_word += char
+        else:
+            if current_word:
+                words.append(current_word)
+                current_word = ""
+            words.append(char)
+    if current_word:
+        words.append(current_word)
+        
+    for word in words:
+        test_line = current_line + word
         bbox = draw.textbbox((0, 0), test_line, font=font)
-        if (bbox[2] - bbox[0]) > max_width:
+        if (bbox[2] - bbox[0]) > max_width and current_line:
             wrapped_lines.append(current_line)
-            current_line = char
+            current_line = word
         else:
             current_line = test_line
+            
     if current_line:
         wrapped_lines.append(current_line)
         
     if len(wrapped_lines) > max_lines:
         wrapped_lines = wrapped_lines[:max_lines]
         wrapped_lines[-1] = wrapped_lines[-1][:-1] + "..."
-
-    # Calculate total height
-    line_spacing = 10
-    total_h = sum([draw.textbbox((0, 0), line, font=font)[3] - draw.textbbox((0, 0), line, font=font)[1] for line in wrapped_lines]) + line_spacing * (len(wrapped_lines) - 1)
-    
-    start_y = top + (bottom - top - total_h) / 2
-    
-    current_y = start_y
-    for line in wrapped_lines:
-        bbox = draw.textbbox((0, 0), line, font=font)
-        line_w = bbox[2] - bbox[0]
-        line_h = bbox[3] - bbox[1]
-        x = left + (max_width - line_w) / 2
-        draw.text((x, current_y), line, font=font, fill=fill)
-        current_y += line_h + line_spacing
+        
+    return wrapped_lines
 
 
 def main() -> int:
