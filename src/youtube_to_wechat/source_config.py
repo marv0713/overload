@@ -26,7 +26,23 @@ class SourceConfigFile:
     sources: list[SourceConfig] = field(default_factory=list)
 
 
+import os
+
 def load_source_config(path: Path) -> SourceConfigFile:
+    db_url = os.environ.get("SUPABASE_DB_URL")
+    if db_url:
+        try:
+            import psycopg2
+            with psycopg2.connect(db_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT value FROM overlord_config WHERE key = 'sources';")
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        sources = [_source_from_dict(item) for item in row[0].get("sources", [])]
+                        return SourceConfigFile(sources=sources)
+        except Exception as e:
+            print(f"Warning: Failed to load sources from Supabase, falling back to local: {e}")
+
     data = json.loads(path.read_text(encoding="utf-8"))
     sources = [_source_from_dict(item) for item in data.get("sources", [])]
     return SourceConfigFile(sources=sources)
